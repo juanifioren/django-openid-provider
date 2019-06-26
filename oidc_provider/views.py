@@ -3,6 +3,8 @@ import logging
 from django.views.decorators.csrf import csrf_exempt
 
 from oidc_provider.lib.endpoints.introspection import TokenIntrospectionEndpoint
+from oidc_provider.lib.endpoints.register import RegisterEndpoint
+
 try:
     from urllib import urlencode
     from urlparse import urlsplit, parse_qs, urlunsplit
@@ -38,7 +40,7 @@ from oidc_provider.lib.errors import (
     RedirectUriError,
     TokenError,
     UserAuthError,
-    TokenIntrospectionError)
+    TokenIntrospectionError, RegisterError)
 from oidc_provider.lib.utils.authorize import strip_prompt_login
 from oidc_provider.lib.utils.common import (
     redirect,
@@ -288,6 +290,9 @@ class ProviderInfoView(View):
         if settings.get('OIDC_SESSION_MANAGEMENT_ENABLE'):
             dic['check_session_iframe'] = site_url + reverse('oidc_provider:check-session-iframe')
 
+        if settings.get('OIDC_REGISTRATION_ENDPOINT_ENABLED'):
+            dic['registration_endpoint'] = site_url + reverse('oidc_provider:register')
+
         response = JsonResponse(dic)
         response['Access-Control-Allow-Origin'] = '*'
 
@@ -351,7 +356,11 @@ class EndSessionView(LogoutView):
         )
 
         self.next_page = next_page
-        return super(EndSessionView, self).dispatch(request, *args, **kwargs)
+        response = super(EndSessionView, self).dispatch(request, *args, **kwargs)
+
+        cors_allow_any(request, response)
+
+        return response
 
 
 class CheckSessionIframeView(View):
@@ -379,3 +388,30 @@ class TokenIntrospectionView(View):
             return self.token_instrospection_endpoint_class.response(dic)
         except TokenIntrospectionError:
             return self.token_instrospection_endpoint_class.response({'active': False})
+
+
+class RegisterView(View):
+
+    @method_decorator(csrf_exempt)
+    def dispatch(self, request, *args, **kwargs):
+        response = super(RegisterView, self).dispatch(request, *args, **kwargs)
+        if settings.get('OIDC_REGISTRATION_ENDPOINT_ALLOW_HTTP_ORIGIN'):
+            response["Access-Control-Allow-Origin"] = request.META.get('HTTP_ORIGIN')
+            response["Access-Control-Allow-Methods"] = "POST"
+            response["Access-Control-Allow-Headers"] = "Content-Type, if-match"
+        return response
+
+    def post(self, request, *args, **kwargs):
+
+        register = RegisterEndpoint(request)
+
+        try:
+            register.validate_params()
+            dic = register.create_response_dic()
+            return register.response(dic)
+
+        except RegisterError as error:
+            return RegisterEndpoint.error_response(
+                error.code,
+                error.description,
+                error.status)
