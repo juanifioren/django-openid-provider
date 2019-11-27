@@ -169,7 +169,7 @@ class AuthorizeView(View):
             return redirect(uri)
 
     def post(self, request, *args, **kwargs):
-        authorize = AuthorizeEndpoint(request)
+        authorize = self.authorize_endpoint_class(request)
 
         try:
             authorize.validate_params()
